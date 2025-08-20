@@ -200,12 +200,10 @@ interface IGiftCardMarketplace {
         external
         view
         returns (bytes32[] memory orderIds, uint256 total);
-    function getActiveOrders() external view returns (bytes32[] memory orderIds);
     function getActiveOrdersPaginated(uint256 offset, uint256 limit)
         external
         view
         returns (bytes32[] memory orderIds, uint256 totalActive);
-    function getOrdersByStatus(OrderStatus status) external view returns (bytes32[] memory orderIds);
     function getOrdersByStatusPaginated(OrderStatus status, uint256 offset, uint256 limit)
         external
         view
@@ -235,7 +233,6 @@ interface IGiftCardMarketplace {
 
     // ====== View Functions - Arbitrators ======
 
-    function getActiveArbitrators() external view returns (address[] memory);
     function getActiveArbitratorsPaginated(uint256 offset, uint256 limit)
         external
         view
@@ -310,6 +307,4 @@ interface IGiftCardMarketplace {
     function arbitratorTimeout() external view returns (uint256);
     function MAX_ARBITRATOR_TIMEOUT() external view returns (uint256);
     function totalStaked() external view returns (uint256);
-    function owner() external view returns (address);
-    function paused() external view returns (bool);
 }

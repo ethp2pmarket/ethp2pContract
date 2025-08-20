@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "./IGiftCardMarketplace.sol";
 
 /**
  * @title GiftCardMarketplace
@@ -21,17 +22,17 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  *      - Delivery confirmation: buyers can confirm delivery for immediate release
  *      - Arbitrator management: minimum stake requirements, unstaking delays, performance tracking
  */
-contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
+contract GiftCardMarketplace is IGiftCardMarketplace, Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using SafeERC20 for IERC20Metadata;
 
     // ====== Types / Storage ======
 
     /// @dev Settlement token (e.g., USDC). Decimals are auto-detected.
-    IERC20Metadata public immutable usdcToken;
+    IERC20Metadata public immutable _usdcToken;
 
     /// @dev Staking token for arbitrators (can be same as USDC or different token). Decimals are auto-detected.
-    IERC20Metadata public immutable stakingToken;
+    IERC20Metadata public immutable _stakingToken;
 
     /// @dev Cached decimals for gas optimization
     uint8 public immutable usdcDecimals;
@@ -54,18 +55,6 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
 
     /// @dev Minimum stake required to become an arbitrator (in staking token units)
     uint256 public minimumStake; // Set in constructor based on token decimals
-
-    /// @dev Arbitrator staking information
-    struct ArbitratorStake {
-        uint256 stakedAmount;
-        uint256 lockedAmount; // Amount locked in active disputes
-        uint256 totalRewards;
-        uint256 totalSlashed;
-        uint256 correctDecisions;
-        uint256 totalDecisions;
-        uint256 stakingTime;
-        bool isActive;
-    }
 
     /// @dev Mapping of arbitrator address to their stake info
     mapping(address => ArbitratorStake) public arbitratorStakes;
@@ -93,65 +82,6 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
 
     /// @dev Maximum arbitrator timeout (7 days)
     uint256 public constant MAX_ARBITRATOR_TIMEOUT = 7 days;
-
-    /// @dev Order lifecycle status.
-    enum OrderStatus {
-        Active, // 0: order is available for purchase
-        Escrowed, // 1: funds held in escrow, awaiting delivery confirmation
-        Disputed, // 2: buyer raised dispute within timelock
-        Completed, // 3: successful transaction
-        Cancelled, // 4: order was cancelled by seller
-        Refunded, // 5: dispute resolved in buyer's favor
-        Expired // 6: reserved for future features
-
-    }
-
-    /// @dev Dispute status for tracking dispute lifecycle.
-    enum DisputeStatus {
-        None, // 0: no dispute
-        Raised, // 1: dispute raised by buyer
-        InArbitration, // 2: arbitrator assigned
-        Resolved // 3: dispute resolved
-
-    }
-
-    /// @dev Dispute information.
-    struct Dispute {
-        bytes32 orderId;
-        address buyer;
-        address seller;
-        address arbitrator;
-        string reason;
-        DisputeStatus status;
-        uint256 raisedAt;
-        uint256 resolvedAt;
-        bool buyerWins; // true if refund, false if release to seller
-        bool challenged; // true if arbitrator decision has been challenged
-    }
-
-    /// @dev Public order data.
-    struct Order {
-        bytes32 orderId;
-        address seller;
-        address buyer; // set when matched
-        string orderType; // e.g., "Amazon", "Walmart"
-        string description; // free text
-        uint256 price; // token amount in smallest unit (e.g., USDC 6dp)
-        OrderStatus status;
-        uint256 createdAt;
-        uint256 updatedAt;
-        uint256 escrowReleaseTime; // auto-release timestamp
-        bool deliveryConfirmed; // buyer confirmed delivery
-        DisputeStatus disputeStatus;
-    }
-
-    /// @dev Public review record. rating is in "tenths" from 10..50 representing 1.0..5.0 stars.
-    struct Review {
-        address reviewer;
-        uint256 rating; // 10..50 => 1.0..5.0 stars with 0.1 precision
-        string comment;
-        uint256 timestamp;
-    }
 
     /// @dev Aggregated seller credit. averageRating is also in tenths (10..50).
     struct SellerCredit {
@@ -187,100 +117,23 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
     // status counters
     mapping(OrderStatus => uint256) public statusCounts;
 
-    // ====== Events ======
-
-    event OrderCreated(
-        bytes32 indexed orderId, address indexed seller, string orderType, string description, uint256 price
-    );
-    event OrderMatched(
-        bytes32 indexed orderId, address indexed buyer, address indexed seller, uint256 price, uint256 releaseTime
-    );
-    event OrderEdited(bytes32 indexed orderId, string orderType, string description, uint256 price);
-    event OrderDelisted(bytes32 indexed orderId, address indexed seller);
-    event DeliveryConfirmed(bytes32 indexed orderId, address indexed buyer);
-    event FundsReleased(bytes32 indexed orderId, address indexed recipient, uint256 amount, string reason);
-
-    event DisputeRaised(bytes32 indexed orderId, address indexed buyer, address indexed arbitrator, string reason);
-    event DisputeResolved(bytes32 indexed orderId, address indexed arbitrator, bool buyerWins, string resolution);
-
-    event ReviewSubmitted(
-        bytes32 indexed orderId, address indexed reviewer, address indexed seller, uint256 rating, string comment
-    );
-
-    event CommissionFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
-    event CommissionRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
-    event EscrowTimeoutUpdated(uint256 oldTimeout, uint256 newTimeout);
-    event ArbitratorStaked(address indexed arbitrator, uint256 amount, uint256 totalStake);
-    event ArbitratorUnstaked(address indexed arbitrator, uint256 amount, uint256 remainingStake);
-    event ArbitratorRewarded(address indexed arbitrator, uint256 reward, bytes32 indexed orderId);
-    event ArbitratorSlashed(address indexed arbitrator, uint256 slashed, bytes32 indexed orderId);
-    event MinimumStakeUpdated(uint256 oldStake, uint256 newStake);
-    event ArbitratorRewardUpdated(uint256 oldRewardBps, uint256 newRewardBps);
-    event SlashingRateUpdated(uint256 oldSlashingBps, uint256 newSlashingBps);
-    event TokensRecovered(address indexed token, address indexed to, uint256 amount);
-    event ArbitratorTimeoutUpdated(uint256 oldTimeout, uint256 newTimeout);
-    event DisputeReassigned(bytes32 indexed orderId, address indexed oldArbitrator, address indexed newArbitrator);
-    event StaleDisputeForceResolved(bytes32 indexed orderId, address indexed arbitrator, bool buyerWins);
-
-    // ====== Errors ======
-
-    error OrderNotFound();
-    error OrderNotActive();
-    error OrderNotCompleted();
-    error OrderNotEscrowed();
-    error InvalidPrice();
-    error InvalidDescription();
-    error InvalidRating(); // must be 10..50
-    error NotOrderSeller();
-    error NotOrderBuyer();
-    error OnlyBuyerCanReview();
-    error AlreadyReviewedThisOrder();
-    error CommissionFeeTooHigh();
-    error EscrowTimeoutTooHigh();
-    error CannotBuyOwnOrder();
-    error ZeroAddress();
-    error LimitOutOfRange();
-    error DisputeWindowExpired();
-    error DisputeAlreadyRaised();
-    error NoDisputeFound();
-    error NotAuthorizedArbitrator();
-    error DisputeNotInArbitration();
-    error DeliveryAlreadyConfirmed();
-    error CannotConfirmOwnDelivery();
-    error EscrowNotReleasable();
-    error InsufficientStake();
-    error ArbitratorNotActive();
-    error StakingAmountTooLow();
-    error UnstakingDelayNotMet();
-    error InsufficientStakeForDispute();
-    error NoActiveArbitrators();
-    error DisputeAlreadyChallenged();
-    error ArbitratorTimeoutTooHigh();
-    error ArbitratorTimeoutNotExpired();
-    error DisputeNotStale();
-    error ArbitratorRewardTooHigh();
-    error SlashingRateTooHigh();
-    error DisputeNotResolved();
-    error FundRecoveryFailed();
-    error InsufficientAvailableStakeForSlashing();
-
     // ====== Constructor ======
 
     /**
-     * @param _usdcToken Settlement token address (e.g., USDC)
-     * @param _stakingToken Token used for arbitrator staking (can be same as USDC)
+     * @param usdcTokenAddr Settlement token address (e.g., USDC)
+     * @param stakingTokenAddr Token used for arbitrator staking (can be same as USDC)
      * @param _owner Initial contract owner
      */
-    constructor(address _usdcToken, address _stakingToken, address _owner) Ownable(_owner) {
-        if (_usdcToken == address(0)) revert ZeroAddress();
-        if (_stakingToken == address(0)) revert ZeroAddress();
+    constructor(address usdcTokenAddr, address stakingTokenAddr, address _owner) Ownable(_owner) {
+        if (usdcTokenAddr == address(0)) revert ZeroAddress();
+        if (stakingTokenAddr == address(0)) revert ZeroAddress();
 
-        usdcToken = IERC20Metadata(_usdcToken);
-        stakingToken = IERC20Metadata(_stakingToken);
+        _usdcToken = IERC20Metadata(usdcTokenAddr);
+        _stakingToken = IERC20Metadata(stakingTokenAddr);
 
         // Cache decimals for gas optimization
-        usdcDecimals = IERC20Metadata(_usdcToken).decimals();
-        stakingDecimals = IERC20Metadata(_stakingToken).decimals();
+        usdcDecimals = IERC20Metadata(usdcTokenAddr).decimals();
+        stakingDecimals = IERC20Metadata(stakingTokenAddr).decimals();
 
         // Set minimum stake to 1000 tokens (in token's native units)
         minimumStake = 1000 * (10 ** stakingDecimals);
@@ -485,7 +338,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         ArbitratorStake storage stake = arbitratorStakes[msg.sender];
 
         // Transfer staking tokens to contract
-        IERC20(stakingToken).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(_stakingToken).safeTransferFrom(msg.sender, address(this), amount);
 
         stake.stakedAmount += amount;
         stake.stakingTime = block.timestamp;
@@ -522,7 +375,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         }
 
         // Transfer tokens back
-        IERC20(stakingToken).safeTransfer(msg.sender, amount);
+        IERC20(_stakingToken).safeTransfer(msg.sender, amount);
 
         emit ArbitratorUnstaked(msg.sender, amount, stake.stakedAmount);
     }
@@ -543,7 +396,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         uint256 releaseTime = block.timestamp + escrowTimeout;
 
         // Pull funds into contract escrow
-        IERC20(usdcToken).safeTransferFrom(msg.sender, address(this), price);
+        IERC20(_usdcToken).safeTransferFrom(msg.sender, address(this), price);
 
         order.buyer = msg.sender;
         order.escrowReleaseTime = releaseTime;
@@ -672,7 +525,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         order.disputeStatus = DisputeStatus.Resolved;
 
         // Transfer reward to arbitrator first
-        IERC20(usdcToken).safeTransfer(msg.sender, reward);
+        IERC20(_usdcToken).safeTransfer(msg.sender, reward);
 
         // Calculate remaining amount after arbitrator reward
         uint256 remainingAmount = order.price - reward;
@@ -758,7 +611,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         // Instead, this marks the dispute for manual governance intervention
 
         // Transfer slashed amount to treasury
-        IERC20(stakingToken).safeTransfer(owner(), slashAmount);
+        IERC20(_stakingToken).safeTransfer(owner(), slashAmount);
 
         emit ArbitratorSlashed(arbitratorAddr, slashAmount, orderId);
     }
@@ -1044,10 +897,10 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         address recipient = commissionRecipient;
 
         // External interactions last (CEI pattern)
-        IERC20(usdcToken).safeTransfer(seller, sellerAmount);
+        IERC20(_usdcToken).safeTransfer(seller, sellerAmount);
 
         if (commissionAmount > 0) {
-            IERC20(usdcToken).safeTransfer(recipient, commissionAmount);
+            IERC20(_usdcToken).safeTransfer(recipient, commissionAmount);
         }
 
         emit FundsReleased(orderId, seller, sellerAmount, "Released to seller");
@@ -1070,7 +923,7 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         address buyer = order.buyer;
 
         // External interactions last (CEI pattern)
-        IERC20(usdcToken).safeTransfer(buyer, amount);
+        IERC20(_usdcToken).safeTransfer(buyer, amount);
 
         emit FundsReleased(orderId, buyer, amount, "Refunded to buyer");
     }
@@ -1391,5 +1244,17 @@ contract GiftCardMarketplace is Ownable, ReentrancyGuard, Pausable {
         )
     {
         return (totalStaked, activeArbitrators.length, minimumStake, arbitratorRewardBps, slashingBps);
+    }
+
+    // ====== Override Functions ======
+
+    /// @dev Override usdcToken to return address instead of IERC20Metadata
+    function usdcToken() external view override returns (address) {
+        return address(_usdcToken);
+    }
+
+    /// @dev Override stakingToken to return address instead of IERC20Metadata
+    function stakingToken() external view override returns (address) {
+        return address(_stakingToken);
     }
 }

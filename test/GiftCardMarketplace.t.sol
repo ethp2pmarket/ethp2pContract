@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
 import "../src/GiftCardMarketplace.sol";
+import "../src/IGiftCardMarketplace.sol";
 import "../src/MockUSDC.sol";
 import "../src/Mock18DecimalToken.sol";
 
@@ -85,12 +86,12 @@ contract GiftCardMarketplaceTest is Test {
     }
 
     function test_ConstructorRevertZeroUSDC() public {
-        vm.expectRevert(GiftCardMarketplace.ZeroAddress.selector);
+        vm.expectRevert(IGiftCardMarketplace.ZeroAddress.selector);
         new GiftCardMarketplace(address(0), address(mockUSDC), owner);
     }
 
     function test_ConstructorRevertZeroStakingToken() public {
-        vm.expectRevert(GiftCardMarketplace.ZeroAddress.selector);
+        vm.expectRevert(IGiftCardMarketplace.ZeroAddress.selector);
         new GiftCardMarketplace(address(mockUSDC), address(0), owner);
     }
 
@@ -159,7 +160,7 @@ contract GiftCardMarketplaceTest is Test {
 
     function test_StakeAsArbitratorInsufficientAmount() public {
         vm.startPrank(arbitrator1);
-        vm.expectRevert(GiftCardMarketplace.StakingAmountTooLow.selector);
+        vm.expectRevert(IGiftCardMarketplace.StakingAmountTooLow.selector);
         marketplace.stakeAsArbitrator(0);
         vm.stopPrank();
     }
@@ -209,7 +210,7 @@ contract GiftCardMarketplaceTest is Test {
         vm.startPrank(arbitrator1);
         marketplace.stakeAsArbitrator(MIN_STAKE);
 
-        vm.expectRevert(GiftCardMarketplace.UnstakingDelayNotMet.selector);
+        vm.expectRevert(IGiftCardMarketplace.UnstakingDelayNotMet.selector);
         marketplace.unstakeAsArbitrator(MIN_STAKE / 2);
 
         vm.stopPrank();
@@ -229,8 +230,8 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.matchOrder(orderId);
         vm.stopPrank();
 
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Escrowed));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Escrowed));
         assertEq(order.buyer, buyer);
         assertEq(order.escrowReleaseTime, block.timestamp + marketplace.escrowTimeout());
         assertFalse(order.deliveryConfirmed);
@@ -252,8 +253,8 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.confirmDelivery(orderId);
         vm.stopPrank();
 
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Completed));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Completed));
         assertTrue(order.deliveryConfirmed);
 
         // Check seller received payment (minus commission)
@@ -285,14 +286,14 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.raiseDispute(orderId, reason);
         vm.stopPrank();
 
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Disputed));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Disputed));
 
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
         assertEq(dispute.buyer, buyer);
         assertEq(dispute.seller, seller);
         assertEq(dispute.reason, reason);
-        assertEq(uint256(dispute.status), uint256(GiftCardMarketplace.DisputeStatus.InArbitration));
+        assertEq(uint256(dispute.status), uint256(IGiftCardMarketplace.DisputeStatus.InArbitration));
 
         // Check arbitrator's stake is locked
         (, uint256 lockedAmount,,,,,,) = marketplace.getArbitratorStake(dispute.arbitrator);
@@ -309,7 +310,7 @@ contract GiftCardMarketplaceTest is Test {
 
         // Check final order status
         order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Completed));
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Completed));
 
         // Check arbitrator received reward
         uint256 expectedReward = (ORDER_PRICE * marketplace.arbitratorRewardBps()) / 10_000;
@@ -344,7 +345,7 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.raiseDispute(orderId, "Gift card code doesn't work");
         vm.stopPrank();
 
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
 
         // Resolve dispute in favor of buyer
         vm.startPrank(dispute.arbitrator);
@@ -352,8 +353,8 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check final order status
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Refunded));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Refunded));
 
         // Check buyer received refund (minus arbitrator reward)
         uint256 arbitratorReward = (ORDER_PRICE * marketplace.arbitratorRewardBps()) / 10_000;
@@ -379,7 +380,7 @@ contract GiftCardMarketplaceTest is Test {
         // Fast forward past dispute window
         vm.warp(block.timestamp + marketplace.escrowTimeout() + 1);
 
-        vm.expectRevert(GiftCardMarketplace.DisputeWindowExpired.selector);
+        vm.expectRevert(IGiftCardMarketplace.DisputeWindowExpired.selector);
         marketplace.raiseDispute(orderId, "Gift card doesn't work");
 
         vm.stopPrank();
@@ -403,7 +404,7 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.raiseDispute(orderId, "Gift card doesn't work");
         vm.stopPrank();
 
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
 
         vm.startPrank(dispute.arbitrator);
         marketplace.resolveDispute(orderId, false, "Evidence shows gift card is valid");
@@ -446,8 +447,8 @@ contract GiftCardMarketplaceTest is Test {
         // Anyone can release escrow after timeout
         marketplace.releaseEscrowAfterTimeout(orderId);
 
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Completed));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Completed));
 
         // Check seller received payment
         uint256 commission = (ORDER_PRICE * marketplace.commissionFeeBps()) / 10_000;
@@ -467,7 +468,7 @@ contract GiftCardMarketplaceTest is Test {
         marketplace.matchOrder(orderId);
         vm.stopPrank();
 
-        vm.expectRevert(GiftCardMarketplace.EscrowNotReleasable.selector);
+        vm.expectRevert(IGiftCardMarketplace.EscrowNotReleasable.selector);
         marketplace.releaseEscrowAfterTimeout(orderId);
     }
 
@@ -508,8 +509,8 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Verify dispute was created successfully
-        GiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Disputed));
+        IGiftCardMarketplace.Order memory order = marketplace.getOrder(orderId);
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Disputed));
     }
 
     // ====== View Function Tests ======
@@ -648,7 +649,7 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check which arbitrator was assigned
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
 
         // Just verify that dispute was created successfully
         assertTrue(dispute.arbitrator != address(0), "Arbitrator should be assigned");
@@ -820,9 +821,9 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Verify order was created successfully
-        GiftCardMarketplace.Order memory order = mixedMarketplace.getOrder(orderId);
+        IGiftCardMarketplace.Order memory order = mixedMarketplace.getOrder(orderId);
         assertEq(order.price, ORDER_PRICE, "Order price should be in 6-decimal units");
-        assertEq(uint256(order.status), uint256(GiftCardMarketplace.OrderStatus.Escrowed), "Order should be escrowed");
+        assertEq(uint256(order.status), uint256(IGiftCardMarketplace.OrderStatus.Escrowed), "Order should be escrowed");
     }
 
     // ====== Challenge Prevention Tests ======
@@ -846,7 +847,7 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Get dispute info
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
         address arbitrator = dispute.arbitrator;
 
         // Resolve dispute first
@@ -856,7 +857,7 @@ contract GiftCardMarketplaceTest is Test {
 
         // Verify dispute is resolved and not challenged
         dispute = marketplace.getDispute(orderId);
-        assertEq(uint256(dispute.status), uint256(GiftCardMarketplace.DisputeStatus.Resolved));
+        assertEq(uint256(dispute.status), uint256(IGiftCardMarketplace.DisputeStatus.Resolved));
         assertFalse(dispute.challenged, "Dispute should not be challenged initially");
 
         // Get arbitrator stake before challenge
@@ -885,7 +886,7 @@ contract GiftCardMarketplaceTest is Test {
 
         // Second challenge should fail with DisputeAlreadyChallenged error
         vm.startPrank(owner);
-        vm.expectRevert(abi.encodeWithSelector(GiftCardMarketplace.DisputeNotResolved.selector));
+        vm.expectRevert(abi.encodeWithSelector(IGiftCardMarketplace.DisputeNotResolved.selector));
         marketplace.challengeArbitratorDecision(orderId);
         vm.stopPrank();
 
@@ -921,7 +922,7 @@ contract GiftCardMarketplaceTest is Test {
         vm.stopPrank();
 
         // Get dispute info
-        GiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
+        IGiftCardMarketplace.Dispute memory dispute = marketplace.getDispute(orderId);
         address arbitrator = dispute.arbitrator;
 
         // Verify arbitrator has 0 correct decisions initially (new arbitrator)
@@ -956,7 +957,7 @@ contract GiftCardMarketplaceTest is Test {
         // If we could challenge again (which we can't due to the fix), it would try to underflow
         // But our fix prevents the second challenge entirely
         vm.startPrank(owner);
-        vm.expectRevert(abi.encodeWithSelector(GiftCardMarketplace.DisputeNotResolved.selector));
+        vm.expectRevert(abi.encodeWithSelector(IGiftCardMarketplace.DisputeNotResolved.selector));
         marketplace.challengeArbitratorDecision(orderId);
         vm.stopPrank();
     }
